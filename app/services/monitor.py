@@ -1,5 +1,13 @@
+"""Deadline monitor — polls Google Classroom for upcoming unsubmitted work
+and optionally fires Telegram notifications.
+
+When a Telegram bot + chat_id are configured, urgent assignments automatically
+trigger a digest+scaffold run and a Telegram message with inline buttons.
+"""
 from __future__ import annotations
 
+import asyncio
+import logging
 from dataclasses import dataclass
 from datetime import datetime, time, timezone
 from uuid import UUID
@@ -9,6 +17,8 @@ from app.db.models import Assignment, AssignmentStatus, Course
 from app.db.repository import AssignmentRepository
 from app.integrations.classroom import ClassroomClient
 
+logger = logging.getLogger(__name__)
+
 SUBMITTED_STATES = {"TURNED_IN", "RETURNED"}
 
 
@@ -16,6 +26,7 @@ SUBMITTED_STATES = {"TURNED_IN", "RETURNED"}
 class MonitorResult:
     scanned: int
     urgent: tuple[Assignment, ...]
+    notified: int = 0
 
 
 class DeadlineMonitor:
@@ -26,11 +37,17 @@ class DeadlineMonitor:
         repository: AssignmentRepository,
         user_id: UUID,
         threshold_hours: int = 24,
+        telegram_bot_token: str | None = None,
+        telegram_chat_id: str | None = None,
+        storage_dir: str = "storage/digests",
     ) -> None:
         self.classroom = classroom
         self.repository = repository
         self.user_id = user_id
         self.threshold_hours = threshold_hours
+        self.telegram_bot_token = telegram_bot_token
+        self.telegram_chat_id = telegram_chat_id
+        self.storage_dir = storage_dir
 
     def poll_once(self) -> MonitorResult:
         scanned = 0
@@ -67,7 +84,63 @@ class DeadlineMonitor:
                 if is_due_soon(state, self.threshold_hours):
                     urgent.append(assignment)
 
-        return MonitorResult(scanned=scanned, urgent=tuple(urgent))
+        notified = 0
+        if urgent:
+            notified = self._process_urgent(urgent)
+
+        return MonitorResult(scanned=scanned, urgent=tuple(urgent), notified=notified)
+
+    def _process_urgent(self, assignments: list[Assignment]) -> int:
+        """Run digest+scaffold for each urgent assignment and optionally notify via Telegram."""
+        notified = 0
+        for assignment in assignments:
+            # Skip if already digested or further along.
+            if assignment.status not in (AssignmentStatus.PENDING,):
+                continue
+            try:
+                self._run_digest(assignment)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Digest failed for %s: %s", assignment.id, exc)
+                continue
+
+            if self.telegram_bot_token and self.telegram_chat_id:
+                try:
+                    self._send_telegram_notification(assignment)
+                    notified += 1
+                except Exception as exc:  # noqa: BLE001
+                    logger.error("Telegram notify failed for %s: %s", assignment.id, exc)
+
+        return notified
+
+    def _run_digest(self, assignment: Assignment) -> None:
+        """Run the digest+scaffold pipeline for *assignment*."""
+        from pathlib import Path
+        import tempfile
+        from app.agent.runner import AssignmentDigestRunner
+
+        # Use a stub text if no real attachments available.
+        tmp = Path(tempfile.mkdtemp())
+        stub = tmp / "assignment.txt"
+        stub.write_text(
+            f"Assignment: {assignment.title}\nDue: {assignment.due_at.isoformat()}\n",
+            encoding="utf-8",
+        )
+        runner = AssignmentDigestRunner(repository=self.repository, storage_dir=self.storage_dir)
+        runner.run_from_attachment_paths(assignment.id, [str(stub)])
+        logger.info("Digest completed for assignment %s.", assignment.id)
+
+    def _send_telegram_notification(self, assignment: Assignment) -> None:
+        from app.integrations.telegram import TelegramBotClient, digest_ready_message
+
+        bot = TelegramBotClient(self.telegram_bot_token)  # type: ignore[arg-type]
+        msg = digest_ready_message(
+            assignment_title=assignment.title,
+            course_name=assignment.course_id,
+            due_at=assignment.due_at,
+            agent_run_id=assignment.id,
+        )
+        asyncio.run(bot.send_message(self.telegram_chat_id, msg))  # type: ignore[arg-type]
+        logger.info("Telegram notification sent for assignment %s.", assignment.id)
 
     def _assignment_from_payload(self, course_id: str, payload: dict) -> Assignment:
         due_at = parse_classroom_due_at(payload)
