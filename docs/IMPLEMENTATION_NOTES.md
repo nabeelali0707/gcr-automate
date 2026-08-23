@@ -25,3 +25,13 @@ To initialize Postgres manually:
 ```bash
 psql "$DATABASE_URL" -f scripts/schema.sql
 ```
+
+## Local Demo
+
+The demo path does not require Google or Telegram credentials:
+
+```bash
+python scripts/run_local_demo.py
+```
+
+It creates one urgent mock Classroom assignment, writes a sample instruction file, and generates digest/scaffold artifacts under `storage/demo`.
