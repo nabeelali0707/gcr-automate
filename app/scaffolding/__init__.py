@@ -1,0 +1,1 @@
+"""Starter scaffold generation."""
