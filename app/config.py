@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     # Token encryption (Fernet key, base64-urlsafe 32-byte key)
     fernet_key: str | None = None
 
+    # LLM APIs
+    gemini_api_key: str | None = None
+    openai_api_key: str | None = None
+
     # Google OAuth 2.0
     google_client_id: str | None = None
     google_client_secret: str | None = None

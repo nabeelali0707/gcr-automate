@@ -91,29 +91,57 @@ class DeadlineMonitor:
         return MonitorResult(scanned=scanned, urgent=tuple(urgent), notified=notified)
 
     def _process_urgent(self, assignments: list[Assignment]) -> int:
-        """Run digest+scaffold for each urgent assignment and optionally notify via Telegram."""
+        """Run digest+scaffold for each urgent assignment and optionally notify via Telegram in parallel."""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        pending_assignments = [
+            a for a in assignments if a.status == AssignmentStatus.PENDING
+        ]
+        if not pending_assignments:
+            return 0
+
         notified = 0
-        for assignment in assignments:
-            # Skip if already digested or further along.
-            if assignment.status not in (AssignmentStatus.PENDING,):
-                continue
+
+        def process_single(assignment: Assignment) -> bool:
+            from app.db.sql_repository import SqlRepository
+            from app.db.session import SessionLocal
+
+            repo = self.repository
+            db = None
+            if isinstance(repo, SqlRepository):
+                db = SessionLocal()
+                repo = SqlRepository(db)
+
             try:
-                self._run_digest(assignment)
-            except Exception as exc:  # noqa: BLE001
+                self._run_digest(assignment, repo)
+            except Exception as exc:
                 logger.error("Digest failed for %s: %s", assignment.id, exc)
-                continue
+                return False
+            finally:
+                if db is not None:
+                    db.close()
 
             if self.telegram_bot_token and self.telegram_chat_id:
                 try:
                     self._send_telegram_notification(assignment)
-                    notified += 1
-                except Exception as exc:  # noqa: BLE001
+                    return True
+                except Exception as exc:
                     logger.error("Telegram notify failed for %s: %s", assignment.id, exc)
+            return False
+
+        max_workers = min(5, len(pending_assignments))
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(process_single, a): a for a in pending_assignments
+            }
+            for future in as_completed(futures):
+                if future.result():
+                    notified += 1
 
         return notified
 
-    def _run_digest(self, assignment: Assignment) -> None:
-        """Run the digest+scaffold pipeline for *assignment*."""
+    def _run_digest(self, assignment: Assignment, repository: AssignmentRepository) -> None:
+        """Run the digest+scaffold pipeline for *assignment* using *repository*."""
         from pathlib import Path
         import tempfile
         from app.agent.runner import AssignmentDigestRunner
@@ -125,7 +153,7 @@ class DeadlineMonitor:
             f"Assignment: {assignment.title}\nDue: {assignment.due_at.isoformat()}\n",
             encoding="utf-8",
         )
-        runner = AssignmentDigestRunner(repository=self.repository, storage_dir=self.storage_dir)
+        runner = AssignmentDigestRunner(repository=repository, storage_dir=self.storage_dir)
         runner.run_from_attachment_paths(assignment.id, [str(stub)])
         logger.info("Digest completed for assignment %s.", assignment.id)
 

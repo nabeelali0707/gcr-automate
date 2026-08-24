@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.agent.digest import digest_requirements
+from app.services.llm import get_llm_digest
 from app.db.models import AssignmentStatus, GeneratedFile, GeneratedFileKind
 from app.db.repository import AssignmentRepository
 from app.extraction.text import extract_text
@@ -25,7 +25,7 @@ class AssignmentDigestRunner:
     def run_from_attachment_paths(self, assignment_id: str, attachment_paths: list[str | Path]) -> DigestRunResult:
         self.storage_dir.mkdir(parents=True, exist_ok=True)
         extracted = "\n\n".join(extract_text(path) for path in attachment_paths)
-        digest = digest_requirements(extracted)
+        digest = get_llm_digest(extracted)
         scaffold = generate_scaffold_from_digest(digest.as_dict())
 
         digest_path = self.storage_dir / f"{assignment_id}-digest.json"

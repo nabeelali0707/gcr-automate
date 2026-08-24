@@ -108,10 +108,10 @@ def node_extract(state: AssignmentState) -> AssignmentState:
 
 def node_digest(state: AssignmentState) -> AssignmentState:
     """Run the requirement digest over the extracted text."""
-    from app.agent.digest import digest_requirements
+    from app.services.llm import get_llm_digest
 
     text = state.get("extracted_text") or ""
-    digest = digest_requirements(text)
+    digest = get_llm_digest(text)
     return {**state, "digest": digest.as_dict()}
 
 

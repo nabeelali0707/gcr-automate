@@ -61,3 +61,47 @@ def test_parse_classroom_due_at_defaults_to_end_of_day() -> None:
     due_at = parse_classroom_due_at({"dueDate": {"year": 2026, "month": 8, "day": 23}})
 
     assert due_at.isoformat() == "2026-08-23T23:59:00+00:00"
+
+
+class FakeClassroomMultiple:
+    def list_courses(self) -> list[dict]:
+        return [{"id": "course-1", "name": "Math"}]
+
+    def list_coursework(self, course_id: str) -> list[dict]:
+        due = datetime.now(timezone.utc) + timedelta(hours=3)
+        return [
+            {
+                "id": f"assignment-{i}",
+                "title": f"Worksheet {i}",
+                "dueDate": {"year": due.year, "month": due.month, "day": due.day},
+                "dueTime": {"hours": due.hour, "minutes": due.minute},
+            }
+            for i in range(3)
+        ]
+
+    def get_submission_status(self, course_id: str, coursework_id: str) -> str:
+        return "CREATED"
+
+
+def test_monitor_processes_multiple_urgent_assignments_in_parallel() -> None:
+    repository = InMemoryRepository()
+    monitor = DeadlineMonitor(
+        classroom=FakeClassroomMultiple(),
+        repository=repository,
+        user_id=uuid4(),
+        threshold_hours=24,
+        telegram_bot_token="fake-token",
+        telegram_chat_id="fake-chat-id",
+    )
+
+    sent_notifs = []
+    def mock_send(assignment):
+        sent_notifs.append(assignment.id)
+    monitor._send_telegram_notification = mock_send
+
+    result = monitor.poll_once()
+
+    assert result.scanned == 3
+    assert len(result.urgent) == 3
+    assert result.notified == 3
+    assert set(sent_notifs) == {"assignment-0", "assignment-1", "assignment-2"}

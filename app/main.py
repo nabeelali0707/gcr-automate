@@ -37,10 +37,9 @@ async def lifespan(app: FastAPI):
     scheduler = None
     if settings.telegram_bot_token and settings.google_client_id:
         try:
-            from app.api.dependencies import get_monitor
+            from app.api.dependencies import run_background_poll
             from app.scheduler import create_scheduler
-            monitor = get_monitor()
-            scheduler = create_scheduler(monitor, settings.poll_interval_minutes)
+            scheduler = create_scheduler(run_background_poll, settings.poll_interval_minutes)
             scheduler.start()
             logger.info(
                 "Scheduler started — polling every %d min.", settings.poll_interval_minutes
