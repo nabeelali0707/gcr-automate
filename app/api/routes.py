@@ -62,12 +62,22 @@ def oauth_google_start():
         redirect_uri=settings.google_redirect_uri,
     )
     state = secrets.token_urlsafe(16)
-    url = flow.authorization_url(state=state)
-    return RedirectResponse(url)
+    url, code_verifier = flow.authorization_url(state=state)
+    
+    response = RedirectResponse(url)
+    # Store the code verifier in an HTTP-only cookie for PKCE validation in the callback.
+    response.set_cookie(
+        "oauth_code_verifier",
+        code_verifier,
+        httponly=True,
+        max_age=300,  # 5 minutes
+        samesite="lax"
+    )
+    return response
 
 
 @router.get("/oauth/google/callback", tags=["auth"])
-def oauth_google_callback(code: str, state: str = "", error: str = ""):
+def oauth_google_callback(request: Request, code: str, state: str = "", error: str = ""):
     """Handle the OAuth callback, exchange code for tokens, and store them."""
     if error:
         raise HTTPException(status_code=400, detail=f"OAuth error: {error}")
@@ -84,8 +94,10 @@ def oauth_google_callback(code: str, state: str = "", error: str = ""):
         client_secret=settings.google_client_secret,
         redirect_uri=settings.google_redirect_uri,
     )
+    
+    code_verifier = request.cookies.get("oauth_code_verifier")
     try:
-        bundle = flow.exchange_code(code)
+        bundle = flow.exchange_code(code, code_verifier=code_verifier)
     except Exception as exc:
         import traceback
         traceback.print_exc()

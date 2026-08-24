@@ -84,8 +84,8 @@ class GoogleOAuthFlow:
         }
         self.redirect_uri = redirect_uri
 
-    def authorization_url(self, state: str | None = None) -> str:
-        """Return the URL the user should be redirected to for consent."""
+    def authorization_url(self, state: str | None = None) -> tuple[str, str]:
+        """Return the URL the user should be redirected to, and the code verifier."""
         flow = Flow.from_client_config(
             self.client_config,
             scopes=list(GOOGLE_SCOPES),
@@ -97,15 +97,17 @@ class GoogleOAuthFlow:
             prompt="consent",
             state=state or "",
         )
-        return url
+        return url, flow.code_verifier
 
-    def exchange_code(self, code: str) -> OAuthTokenBundle:
+    def exchange_code(self, code: str, code_verifier: str | None = None) -> OAuthTokenBundle:
         """Exchange an authorization code for an OAuthTokenBundle."""
         flow = Flow.from_client_config(
             self.client_config,
             scopes=list(GOOGLE_SCOPES),
             redirect_uri=self.redirect_uri,
         )
+        if code_verifier:
+            flow.code_verifier = code_verifier
         flow.fetch_token(code=code)
         creds: Credentials = flow.credentials
         expires_at = creds.expiry or datetime.now(timezone.utc)
