@@ -87,6 +87,8 @@ def oauth_google_callback(code: str, state: str = "", error: str = ""):
     try:
         bundle = flow.exchange_code(code)
     except Exception as exc:
+        import traceback
+        traceback.print_exc()
         logger.exception("Token exchange failed:")
         raise HTTPException(status_code=502, detail="Token exchange with Google failed.") from exc
 
