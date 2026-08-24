@@ -18,7 +18,9 @@
 ### Phase 3 — File extraction + requirement digest ✅
 - `app/extraction/text.py` — real PDF (pdfplumber), DOCX (python-docx), plain text,
   CSV/MD, and raw fallback; optional Tesseract OCR for image-only PDF pages
-- `app/agent/digest.py` — rule-based `digest_requirements()` (keyword/regex, no LLM key needed)
+- `app/services/llm.py` — AI requirement digest extractor (supporting Gemini and OpenAI
+  via HTTPX with structured JSON mode), falling back to rule-based keyword/regex extraction
+  in `app/agent/digest.py` when API keys are not configured.
 
 ### Phase 4 — Scaffold generation ✅
 - `app/scaffolding/generator.py` — deterministic scaffold from digest; includes
@@ -125,9 +127,8 @@ then back to `/oauth/google/callback` which stores encrypted tokens in Supabase.
 
 ## Remaining work (Phase 8 — Polish)
 
-- [ ] LLM-backed digest (replace keyword/regex with an LLM call — provider TBD, no key added yet)
-- [ ] Parallel processing across multiple urgent assignments
-- [ ] Model router / fallback for LLM providers
+- [x] LLM-backed digest (supporting Gemini and OpenAI APIs, falling back to local rule-based extractor)
+- [x] Parallel processing across multiple urgent assignments (concurrent execution via ThreadPoolExecutor)
 - [ ] Row Level Security policies on Supabase tables
 - [ ] Multi-user support (currently single-user UUID `00000000-0000-0000-0000-000000000001`)
 - [ ] Retry logic with exponential backoff for Classroom/Drive API calls
